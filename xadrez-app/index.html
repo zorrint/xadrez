@@ -13,7 +13,7 @@ button{cursor:pointer;background:#3a3733;color:#eee}button:hover{background:#4a4
 #app{display:flex;gap:18px;justify-content:center;align-items:flex-start}
 #left{display:flex;gap:8px}
 #board{position:relative;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);
-width:var(--bs);height:var(--bs);border-radius:4px;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+width:var(--bs);height:var(--bs);border-radius:4px;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
 .sq{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;
 font-size:calc(var(--bs)/8*.8);line-height:1}
 .l{background:#eeeed2}.d{background:#769656}.lm{box-shadow:inset 0 0 0 100px #f6f66988}.sl{box-shadow:inset 0 0 0 100px #3b82f688}
@@ -36,7 +36,6 @@ font-size:calc(var(--bs)/8*.8);line-height:1}
 .desktop #bar>div{height:var(--p,50%);width:100%}
 .desktop #panel{width:380px}
 .desktop #mv{max-height:140px;overflow:auto}
-.desktop .sq span[draggable=true]{cursor:grab}
 </style></head><body>
 <div id=app>
  <div id=left><div id=bar><div></div></div><div id=board></div></div>
@@ -48,7 +47,8 @@ font-size:calc(var(--bs)/8*.8);line-height:1}
   <details id=cfg><summary>Configurações</summary>
    <label>Elo <input id=elo size=5 value=800 onchange=render()></label>
    <label><input type=checkbox id=hint onchange=render()> Mostrar dica e setas antes de jogar</label>
-   <label><input type=checkbox id=auto> Adversário joga no meu elo</label></details>
+   <label><input type=checkbox id=auto> Adversário joga no meu elo</label>
+   <label><input type=checkbox id=dragopt checked> Arrastar peças (além de tocar)</label></details>
   <div id=mv></div>
   <div id=fenrow><input id=fen placeholder="Colar FEN"><button onclick="reset($('fen').value.trim())">Carregar</button></div>
   <div id=eng>Stockfish 19 rodando neste aparelho</div>
@@ -86,10 +86,9 @@ function render(){
  const tg=sel?c.legal.filter(m=>m.startsWith(sel)).map(m=>m.slice(2,4)):[];
  const dd=MODE=='desktop';let h='';
  for(let n=0;n<64;n++){const k=flip?63-n:n,r=k>>3,f=k&7,name=String.fromCharCode(97+f)+(8-r),p=cells[k];
-  const drag=dd&&p&&c.legal.some(m=>m.startsWith(name));
-  h+=`<div class="sq ${(r+f)%2?'d':'l'} ${last.includes(name)?'lm':''} ${name==sel?'sl':''}" onclick="clk('${name}')" ondragover="event.preventDefault()" ondrop="clk('${name}')">`
+  h+=`<div class="sq ${(r+f)%2?'d':'l'} ${last.includes(name)?'lm':''} ${name==sel?'sl':''}" data-n="${name}" onclick="clk('${name}')">`
   +(n%8==0?`<u class=r>${8-r}</u>`:'')+(n>>3==7?`<u class=f>${name[0]}</u>`:'')
-  +`<span class="${p==p.toUpperCase()?'w':'b'}" ${drag?`draggable=true ondragstart="ds('${name}',event)" ondragend="sel=null;render()"`:''}>${p?G[p.toUpperCase()]:''}</span>`
+  +`<span class="${p==p.toUpperCase()?'w':'b'}" >${p?G[p.toUpperCase()]:''}</span>`
   +(tg.includes(name)?'<i></i>':'')+'</div>'}
  $('board').innerHTML=h;$('mv').textContent=moveText();
  $('st').textContent=c.over?'Fim: '+c.result:(c.fen.split(' ')[1]=='w'?'Brancas':'Pretas')+' jogam'+(c.check?' (xeque)':'');
@@ -104,7 +103,6 @@ function arrow(u,col,w){const [x1,y1]=sqc(u.slice(0,2)),[x2,y2]=sqc(u.slice(2,4)
 function arrows(x){const o=$('board').querySelector('svg');if(o)o.remove();
  const s=arrow(x.best_uci,'#e53935',.17)+arrow(x.sug_uci,'#1e88e5',x.sug_uci==x.best_uci?.07:.17);
  $('board').insertAdjacentHTML('beforeend',`<svg viewBox="0 0 8 8" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.8">${s}</svg>`)}
-function ds(n,e){sel=n;e.dataTransfer.setData('text','x')}
 async function clk(name){
  const c=cur();if(c.over)return;
  if(sel&&c.legal.some(m=>m.startsWith(sel+name))){
@@ -129,6 +127,33 @@ function feedback(prev,r,a0,a1){
  h+=r.uci==a0.sug_uci?`<br>Igual ao lance típico de ${elo()} de elo ✔`:`<br>Lance típico de ${elo()} de elo: <b>${a0.sug}</b>`;
  h+=`<br><button onclick="undo();$('hint').checked=true;render()">↶ Desfazer e ver setas</button>`;$('fb').innerHTML=h}
 function undo(){if(H.length<2)return;const e=cur().engine;H.pop();if(e&&H.length>1)H.pop();sel=null;$('fb').innerHTML='';render()}
+
+/* arrastar peças (mouse e toque) */
+let DR=null;const bd=$('board');
+bd.addEventListener('pointerdown',e=>{
+ if(!$('dragopt').checked||(e.pointerType=='mouse'&&e.button!=0))return;
+ const sq=e.target.closest&&e.target.closest('.sq');if(!sq)return;
+ const n=sq.dataset.n,c=cur(),sp=sq.querySelector('span');
+ if(c.over||!sp||!sp.textContent||!c.legal.some(m=>m.startsWith(n)))return;
+ DR={n,x:e.clientX,y:e.clientY,id:e.pointerId,on:false,g:null,cls:sp.className,t:sp.textContent}});
+bd.addEventListener('pointermove',e=>{
+ if(!DR||e.pointerId!==DR.id)return;
+ if(!DR.on){if(Math.hypot(e.clientX-DR.x,e.clientY-DR.y)<6)return;
+  DR.on=true;try{bd.setPointerCapture(e.pointerId)}catch(_){}
+  sel=DR.n;render();
+  const s=bd.querySelector(`[data-n="${DR.n}"] span`);if(s)s.style.opacity='.25';
+  const g=document.createElement('div');g.className=DR.cls;g.textContent=DR.t;
+  g.style.cssText=`position:fixed;z-index:9;pointer-events:none;transform:translate(-50%,-60%);line-height:1;font-size:${bd.clientWidth/8*.95}px`;
+  document.body.appendChild(g);DR.g=g}
+ DR.g.style.left=e.clientX+'px';DR.g.style.top=e.clientY+'px';e.preventDefault()});
+async function endDrag(e,cancel){
+ if(!DR||e.pointerId!==DR.id)return;const d=DR;DR=null;if(!d.on)return;
+ d.g.remove();try{bd.releasePointerCapture(e.pointerId)}catch(_){}
+ const t=cancel?null:document.elementFromPoint(e.clientX,e.clientY),q=t&&t.closest&&t.closest('.sq'),to=q&&q.dataset.n;
+ if(to&&to!=d.n&&cur().legal.some(m=>m.startsWith(d.n+to))){sel=d.n;await clk(to)}
+ else{sel=to==d.n?d.n:null;render()}}
+bd.addEventListener('pointerup',e=>endDrag(e));
+bd.addEventListener('pointercancel',e=>endDrag(e,true));
 setMode(MODE);reset(START);
 if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script></body></html>
