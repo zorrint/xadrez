@@ -1,0 +1,159 @@
+<!doctype html><html lang="pt-BR"><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name=theme-color content="#262421">
+<link rel=manifest href=manifest.json>
+<link rel=icon href=icon-192.png>
+<link rel=apple-touch-icon href=icon-192.png>
+<title>Tabuleiro de estudo</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#262421;color:#eee;margin:0;padding:8px}
+input,button{padding:8px 12px;border-radius:6px;border:0;font-size:15px}
+button{cursor:pointer;background:#3a3733;color:#eee}button:hover{background:#4a4640}
+#app{display:flex;gap:18px;justify-content:center;align-items:flex-start}
+#left{display:flex;gap:8px}
+#board{position:relative;display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);
+width:var(--bs);height:var(--bs);border-radius:4px;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
+.sq{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;
+font-size:calc(var(--bs)/8*.8);line-height:1}
+.l{background:#eeeed2}.d{background:#769656}.lm{box-shadow:inset 0 0 0 100px #f6f66988}.sl{box-shadow:inset 0 0 0 100px #3b82f688}
+.w{color:#fff;text-shadow:0 0 2px #000,0 0 2px #000,0 0 3px #000}.b{color:#000}
+.sq i{position:absolute;width:30%;height:30%;border-radius:50%;background:#0005;pointer-events:none}
+.sq u{position:absolute;text-decoration:none;font:600 calc(var(--bs)/8*.17) system-ui;color:#0008;pointer-events:none}
+.sq u.r{top:2px;left:3px}.sq u.f{bottom:1px;right:3px}
+#bar{background:#000;border-radius:3px;overflow:hidden}#bar>div{background:#fff;transition:.3s}
+#panel>*{margin-bottom:10px}#fb,#hintbox,#st{line-height:1.45}#hintbox{color:#ddd}
+#mv{color:#bbb;font-size:14px;line-height:1.5}#btns{display:flex;gap:6px;flex-wrap:wrap}
+#cfg{background:#302e2b;border-radius:6px;padding:8px}#cfg summary{cursor:pointer}#cfg label{display:block;margin:8px 0}#fenrow{display:flex;gap:6px}#fen{flex:1;min-width:0}
+#eng{font-size:12px;color:#888}
+.mobile #app{flex-direction:column;align-items:center;gap:8px}
+.mobile #left{flex-direction:column;gap:6px}
+.mobile #bar{width:var(--bs);height:10px}.mobile #bar>div{width:var(--p,50%);height:100%}
+.mobile #panel{width:var(--bs)}.mobile #ttl{display:none}
+.mobile #btns button{flex:1;padding:14px 4px;font-size:16px}
+.mobile #cfg label{padding:6px 0;font-size:16px}
+.desktop #bar{width:22px;height:var(--bs);display:flex;flex-direction:column-reverse}
+.desktop #bar>div{height:var(--p,50%);width:100%}
+.desktop #panel{width:380px}
+.desktop #mv{max-height:140px;overflow:auto}
+</style></head><body>
+<div id=app>
+ <div id=left><div id=bar><div></div></div><div id=board></div></div>
+ <div id=panel>
+  <h3 id=ttl>Tabuleiro de estudo</h3>
+  <div id=st></div><div id=fb></div><div id=hintbox></div>
+  <div id=btns><button onclick=undo()>↶ Desfazer</button><button onclick="reset(START)">Reiniciar</button>
+   <button onclick="flip=!flip;render()">Virar</button><button id=mb onclick="setMode(MODE=='mobile'?'desktop':'mobile')"></button></div>
+  <details id=cfg><summary>Configurações</summary>
+   <label>Elo <input id=elo size=5 value=800 onchange=render()></label>
+   <label><input type=checkbox id=hint onchange=render()> Mostrar dica e setas antes de jogar</label>
+   <label><input type=checkbox id=auto> Adversário joga no meu elo</label>
+   <label><input type=checkbox id=dragopt checked> Arrastar peças (além de tocar)</label></details>
+  <div id=mv></div>
+  <div id=fenrow><input id=fen placeholder="Colar FEN"><button onclick="reset($('fen').value.trim())">Carregar</button></div>
+  <div id=eng>Stockfish 19 rodando neste aparelho</div>
+ </div>
+</div>
+<script src=chess.js></script>
+<script src=engine.js></script>
+<script>
+const E=makeEngine(new Worker('stockfish-19-lite-single.js'));
+const post=async(u,b)=>u=='/api/state'?E.state(b.fen):u=='/api/move'?E.move(b.fen,b.uci):E.analyze(b.fen,b.elo);
+const START='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+const G={K:'♚',Q:'♛',R:'♜',B:'♝',N:'♞',P:'♟\uFE0E'};
+let H=[],sel=null,flip=false,A={};
+const $=id=>document.getElementById(id);
+const elo=()=>+$('elo').value||800, cur=()=>H[H.length-1];
+const auto=()=>(/Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent)||matchMedia('(pointer:coarse)').matches)?'mobile':'desktop';
+let MODE=(()=>{try{return localStorage.getItem('mode')}catch(e){return null}})()||auto();
+function fit(){const w=innerWidth,h=innerHeight;
+ const bs=MODE=='mobile'?Math.min(w-16,640):Math.max(300,Math.min(h-30,w-460,720));
+ document.documentElement.style.setProperty('--bs',bs+'px')}
+function setMode(m){MODE=m;try{localStorage.setItem('mode',m)}catch(e){}
+ document.body.className=m;$('cfg').open=m=='desktop';
+ $('mb').textContent=m=='mobile'?'📱 Celular':'🖥 PC';fit();if(H.length)render()}
+addEventListener('resize',fit);
+addEventListener('keydown',e=>{if(MODE!='desktop'||e.target.tagName=='INPUT')return;
+ if(e.key=='ArrowLeft'||e.key=='Backspace')undo();if(e.key=='f')render(flip=!flip);if(e.key=='r')reset(START)});
+function analyze(fen){const k=fen+'|'+elo();return A[k]??=post('/api/analyze',{fen,elo:elo()})}
+function cellsOf(fen){const c=[];fen.split(' ')[0].split('/').forEach(row=>{for(const ch of row){if(/\d/.test(ch))for(let k=0;k<+ch;k++)c.push('');else c.push(ch)}});return c}
+async function reset(fen){const s=await post('/api/state',{fen});if(s.error){alert('FEN inválida');return}
+ H=[s];sel=null;$('fb').innerHTML='';render()}
+function moveText(){let [,t,,,,n]=H[0].fen.split(' ');n=+n;let s='',w=t=='w';
+ H.slice(1).forEach((x,i)=>{if(w)s+=n+'. ';else if(i==0)s+=n+'... ';s+=x.san+' ';if(!w)n++;w=!w});return s}
+function render(){
+ const c=cur(),cells=cellsOf(c.fen),last=c.uci?[c.uci.slice(0,2),c.uci.slice(2,4)]:[];
+ const tg=sel?c.legal.filter(m=>m.startsWith(sel)).map(m=>m.slice(2,4)):[];
+ const dd=MODE=='desktop';let h='';
+ for(let n=0;n<64;n++){const k=flip?63-n:n,r=k>>3,f=k&7,name=String.fromCharCode(97+f)+(8-r),p=cells[k];
+  h+=`<div class="sq ${(r+f)%2?'d':'l'} ${last.includes(name)?'lm':''} ${name==sel?'sl':''}" data-n="${name}" onclick="clk('${name}')">`
+  +(n%8==0?`<u class=r>${8-r}</u>`:'')+(n>>3==7?`<u class=f>${name[0]}</u>`:'')
+  +`<span class="${p==p.toUpperCase()?'w':'b'}" >${p?G[p.toUpperCase()]:''}</span>`
+  +(tg.includes(name)?'<i></i>':'')+'</div>'}
+ $('board').innerHTML=h;$('mv').textContent=moveText();
+ $('st').textContent=c.over?'Fim: '+c.result:(c.fen.split(' ')[1]=='w'?'Brancas':'Pretas')+' jogam'+(c.check?' (xeque)':'');
+ if(!$('hint').checked)$('hintbox').textContent='';
+ analyze(c.fen).then(x=>{if(cur()!==c)return;
+  $('bar').style.setProperty('--p',(50+50*Math.tanh(x.ev/400))+'%');
+  if($('hint').checked&&x.best){$('hintbox').innerHTML=`<span style="color:#e53935">●</span> Melhor: <b>${x.best}</b> &nbsp; <span style="color:#1e88e5">●</span> Para ${elo()} de elo: <b>${x.sug}</b>`;arrows(x)}})}
+function sqc(n){let f=n.charCodeAt(0)-97,r=8-+n[1];if(flip){f=7-f;r=7-r}return [f+.5,r+.5]}
+function arrow(u,col,w){const [x1,y1]=sqc(u.slice(0,2)),[x2,y2]=sqc(u.slice(2,4));
+ const dx=x2-x1,dy=y2-y1,L=Math.hypot(dx,dy),ux=dx/L,uy=dy/L,hl=w*2.4,hw=w*1.3,bx=x2-ux*hl,by=y2-uy*hl;
+ return `<line x1="${x1}" y1="${y1}" x2="${bx+ux*.02}" y2="${by+uy*.02}" stroke="${col}" stroke-width="${w}" stroke-linecap="round"/><polygon points="${x2},${y2} ${bx-uy*hw},${by+ux*hw} ${bx+uy*hw},${by-ux*hw}" fill="${col}"/>`}
+function arrows(x){const o=$('board').querySelector('svg');if(o)o.remove();
+ const s=arrow(x.best_uci,'#e53935',.17)+arrow(x.sug_uci,'#1e88e5',x.sug_uci==x.best_uci?.07:.17);
+ $('board').insertAdjacentHTML('beforeend',`<svg viewBox="0 0 8 8" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;opacity:.8">${s}</svg>`)}
+async function clk(name){
+ const c=cur();if(c.over)return;
+ if(sel&&c.legal.some(m=>m.startsWith(sel+name))){
+  let uci=sel+name;const p=cellsOf(c.fen)[(8-+sel[1])*8+sel.charCodeAt(0)-97];
+  if((p=='P'&&name[1]=='8')||(p=='p'&&name[1]=='1'))uci+='q';
+  sel=null;return play(uci)}
+ sel=c.legal.some(m=>m.startsWith(name))?name:null;render()}
+async function play(uci,engine){
+ const prev=cur(),r=await post('/api/move',{fen:prev.fen,uci});if(r.error)return;
+ H.push({...r,engine:!!engine});const tok=H.length;render();
+ if(engine)return;
+ $('fb').textContent='Analisando…';
+ const [a0,a1]=await Promise.all([analyze(prev.fen),analyze(r.fen)]);if(H.length!=tok)return;
+ feedback(prev,r,a0,a1);
+ if($('auto').checked&&!r.over&&a1.sug_uci)play(a1.sug_uci,true)}
+const lab=l=>l<=20?['Melhor','#7fd35a']:l<=50?['Bom','#9fc']:l<=100?['Imprecisão','#f7c631']:l<=300?['Erro','#f58a1f']:['Blunder','#fa412d'];
+function feedback(prev,r,a0,a1){
+ const s=prev.fen.split(' ')[1]=='w'?1:-1,cl=x=>Math.max(-1000,Math.min(1000,x));
+ const loss=Math.max(0,s*(cl(a0.ev)-cl(a1.ev))),[t,col]=lab(loss);
+ let h=`<b style="color:${col}">${r.san}: ${t}</b> (perda ${loss} cp)<br>`;
+ h+=r.uci==a0.best_uci?'Foi o melhor lance da posição.':`Melhor lance: <b>${a0.best}</b> (linha: ${a0.line})`;
+ h+=r.uci==a0.sug_uci?`<br>Igual ao lance típico de ${elo()} de elo ✔`:`<br>Lance típico de ${elo()} de elo: <b>${a0.sug}</b>`;
+ h+=`<br><button onclick="undo();$('hint').checked=true;render()">↶ Desfazer e ver setas</button>`;$('fb').innerHTML=h}
+function undo(){if(H.length<2)return;const e=cur().engine;H.pop();if(e&&H.length>1)H.pop();sel=null;$('fb').innerHTML='';render()}
+
+/* arrastar peças (mouse e toque) */
+let DR=null;const bd=$('board');
+bd.addEventListener('pointerdown',e=>{
+ if(!$('dragopt').checked||(e.pointerType=='mouse'&&e.button!=0))return;
+ const sq=e.target.closest&&e.target.closest('.sq');if(!sq)return;
+ const n=sq.dataset.n,c=cur(),sp=sq.querySelector('span');
+ if(c.over||!sp||!sp.textContent||!c.legal.some(m=>m.startsWith(n)))return;
+ DR={n,x:e.clientX,y:e.clientY,id:e.pointerId,on:false,g:null,cls:sp.className,t:sp.textContent}});
+bd.addEventListener('pointermove',e=>{
+ if(!DR||e.pointerId!==DR.id)return;
+ if(!DR.on){if(Math.hypot(e.clientX-DR.x,e.clientY-DR.y)<6)return;
+  DR.on=true;try{bd.setPointerCapture(e.pointerId)}catch(_){}
+  sel=DR.n;render();
+  const s=bd.querySelector(`[data-n="${DR.n}"] span`);if(s)s.style.opacity='.25';
+  const g=document.createElement('div');g.className=DR.cls;g.textContent=DR.t;
+  g.style.cssText=`position:fixed;z-index:9;pointer-events:none;transform:translate(-50%,-60%);line-height:1;font-size:${bd.clientWidth/8*.95}px`;
+  document.body.appendChild(g);DR.g=g}
+ DR.g.style.left=e.clientX+'px';DR.g.style.top=e.clientY+'px';e.preventDefault()});
+async function endDrag(e,cancel){
+ if(!DR||e.pointerId!==DR.id)return;const d=DR;DR=null;if(!d.on)return;
+ d.g.remove();try{bd.releasePointerCapture(e.pointerId)}catch(_){}
+ const t=cancel?null:document.elementFromPoint(e.clientX,e.clientY),q=t&&t.closest&&t.closest('.sq'),to=q&&q.dataset.n;
+ if(to&&to!=d.n&&cur().legal.some(m=>m.startsWith(d.n+to))){sel=d.n;await clk(to)}
+ else{sel=to==d.n?d.n:null;render()}}
+bd.addEventListener('pointerup',e=>endDrag(e));
+bd.addEventListener('pointercancel',e=>endDrag(e,true));
+setMode(MODE);reset(START);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script></body></html>
